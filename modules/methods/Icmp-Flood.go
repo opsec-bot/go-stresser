@@ -43,23 +43,44 @@ func IMCP(target string, last string) {
 
 	startTime := time.Now()
 	endTime := startTime.Add(time.Duration(duration) * time.Second)
+
+	sendChan := make(chan int, 100)
+	recvChan := make(chan int, 100)
+
+	numSenders := 10
+	numReceivers := 10
+
+	for i := 0; i < numSenders; i++ {
+		go func() {
+			for time.Now().Before(endTime) {
+				sendChan <- 1
+			}
+		}()
+	}
+
+	for i := 0; i < numReceivers; i++ {
+		go func() {
+			for range sendChan {
+				b, err := msg.Marshal(nil)
+				if err != nil {
+					fmt.Println("Error encoding ICMP message:", err)
+					os.Exit(1)
+				}
+
+				_, err = conn.WriteTo(b, &net.IPAddr{IP: net.ParseIP(target)})
+				if err != nil {
+					fmt.Println("Error sending ICMP message:", err)
+					os.Exit(1)
+				}
+
+				recvChan <- 1
+			}
+		}()
+	}
+
 	totalSent := 0
 
-	for time.Now().Before(endTime) {
-		totalSent++
-
-		b, err := msg.Marshal(nil)
-		if err != nil {
-			fmt.Println("Error encoding ICMP message:", err)
-			os.Exit(1)
-		}
-
-		_, err = conn.WriteTo(b, &net.IPAddr{IP: net.ParseIP(target)})
-		if err != nil {
-			fmt.Println("Error sending ICMP message:", err)
-			os.Exit(1)
-		}
-
+	for range recvChan {
 		err = conn.SetReadDeadline(time.Now().Add(timeout))
 		if err != nil {
 			fmt.Println("Error setting read deadline:", err)
@@ -77,14 +98,14 @@ func IMCP(target string, last string) {
 
 			switch rm.Type {
 			case ipv4.ICMPTypeEchoReply:
+				totalSent++
 				elapsed := time.Since(startTime).Seconds()
 				fmt.Printf("[+] Sent %d | Elapsed %.2f Seconds.\n", totalSent, elapsed)
 			default:
 				fmt.Printf("Received unexpected ICMP message from %s: %+v\n", target, rm)
 			}
 		} else {
-			elapsed := time.Since(startTime).Seconds()
-			fmt.Printf("[+] Sent %d | Elapsed %.2f Seconds.\n", totalSent, elapsed)
+			os.Exit(0)
 		}
 	}
 }
